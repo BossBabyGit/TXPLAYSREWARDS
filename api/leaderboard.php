@@ -4,6 +4,36 @@ declare(strict_types=1);
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store');
 
+if (!function_exists('leaderboardTableExists')) {
+    function leaderboardTableExists(PDO $pdo, string $table): bool
+    {
+        try {
+            $stmt = $pdo->prepare('SHOW TABLES LIKE ?');
+            $stmt->execute([$table]);
+            return $stmt->fetchColumn() !== false;
+        } catch (PDOException $e) {
+            return false;
+        }
+    }
+}
+
+if (!function_exists('legacyRangeHasData')) {
+    function legacyRangeHasData(PDO $pdo, string $campaign, string $start, string $end): bool
+    {
+        try {
+            $stmt = $pdo->prepare('SELECT COUNT(*) FROM users WHERE campaign_code = :campaign AND created_at >= :start AND created_at < :end');
+            $stmt->execute([
+                ':campaign' => $campaign,
+                ':start' => $start,
+                ':end' => $end,
+            ]);
+            return (int) $stmt->fetchColumn() > 0;
+        } catch (PDOException $e) {
+            return false;
+        }
+    }
+}
+
 // load config
 $config = require dirname(__DIR__) . '/config.php';
 $db = $config['database'] ?? [];
@@ -43,53 +73,104 @@ try {
 
     $rangeStart = $rangeStartDate->format('Y-m-d H:i:s');
     $rangeEnd = $rangeEndDate->format('Y-m-d H:i:s');
+    $displayStart = $rangeStartDate->format('Y-m-d H:i:s');
+    $displayEnd = $rangeEndDate->modify('-1 second')->format('Y-m-d H:i:s');
 
-    $rangeClause = ' AND created_at >= :start AND created_at < :end';
-    $params = [
-        ':campaign' => $campaign,
-        ':start'    => $rangeStart,
-        ':end'      => $rangeEnd,
-    ];
-    $fallbackParams = [':campaign' => $campaign];
+    $rows = [];
+    $stats = ['total_players' => 0, 'total_wagered' => 0, 'highest_wager' => 0];
+    $dataSource = 'users';
 
-    $execute = static function (PDO $pdo, string $sqlBase, array $params, array $fallbackParams, string $rangeClause): PDOStatement {
-        $sql = sprintf($sqlBase, $rangeClause);
+    $periodStart = $rangeStart;
+    $useEntriesTable = leaderboardTableExists($pdo, 'leaderboard_entries');
+
+    if ($useEntriesTable) {
         try {
-            $stmt = $pdo->prepare($sql);
+            $params = [
+                ':campaign' => $campaign,
+                ':period'   => $periodStart,
+            ];
+
+            $entriesSql = '
+                SELECT username, wager_amount
+                FROM leaderboard_entries
+                WHERE campaign_code = :campaign AND period_start = :period
+                ORDER BY wager_amount DESC
+                LIMIT 20
+            ';
+            $stmt = $pdo->prepare($entriesSql);
             $stmt->execute($params);
-            return $stmt;
-        } catch (PDOException $e) {
-            if ($rangeClause === '') {
-                throw $e;
+            $rows = $stmt->fetchAll() ?: [];
+
+            $statsSql = '
+                SELECT
+                    COUNT(*)                      AS total_players,
+                    COALESCE(SUM(wager_amount),0) AS total_wagered,
+                    COALESCE(MAX(wager_amount),0) AS highest_wager
+                FROM leaderboard_entries
+                WHERE campaign_code = :campaign AND period_start = :period
+            ';
+            $s = $pdo->prepare($statsSql);
+            $s->execute($params);
+            $stats = $s->fetch() ?: $stats;
+
+            if (!$rows && (int) ($stats['total_players'] ?? 0) === 0 && legacyRangeHasData($pdo, $campaign, $rangeStart, $rangeEnd)) {
+                $useEntriesTable = false;
+                $rows = [];
+                $stats = ['total_players' => 0, 'total_wagered' => 0, 'highest_wager' => 0];
+            } else {
+                $dataSource = 'leaderboard_entries';
             }
-            $stmt = $pdo->prepare(sprintf($sqlBase, ''));
-            $stmt->execute($fallbackParams);
-            return $stmt;
+        } catch (PDOException $e) {
+            $useEntriesTable = false;
         }
-    };
+    }
 
-    // Top 20
-    $entriesSql = "
-        SELECT username, wager_amount
-        FROM users
-        WHERE campaign_code = :campaign%s
-        ORDER BY wager_amount DESC
-        LIMIT 20
-    ";
-    $stmt = $execute($pdo, $entriesSql, $params, $fallbackParams, $rangeClause);
-    $rows = $stmt->fetchAll() ?: [];
+    if (!$useEntriesTable) {
+        $rangeClause = ' AND created_at >= :start AND created_at < :end';
+        $params = [
+            ':campaign' => $campaign,
+            ':start'    => $rangeStart,
+            ':end'      => $rangeEnd,
+        ];
+        $fallbackParams = [':campaign' => $campaign];
 
-    // Stats
-    $statsSql = "
-        SELECT
-            COUNT(*)                      AS total_players,
-            COALESCE(SUM(wager_amount),0) AS total_wagered,
-            COALESCE(MAX(wager_amount),0) AS highest_wager
-        FROM users
-        WHERE campaign_code = :campaign%s
-    ";
-    $s = $execute($pdo, $statsSql, $params, $fallbackParams, $rangeClause);
-    $stats = $s->fetch() ?: ['total_players' => 0, 'total_wagered' => 0, 'highest_wager' => 0];
+        $execute = static function (PDO $pdo, string $sqlBase, array $params, array $fallbackParams, string $rangeClause): PDOStatement {
+            $sql = sprintf($sqlBase, $rangeClause);
+            try {
+                $stmt = $pdo->prepare($sql);
+                $stmt->execute($params);
+                return $stmt;
+            } catch (PDOException $e) {
+                if ($rangeClause === '') {
+                    throw $e;
+                }
+                $stmt = $pdo->prepare(sprintf($sqlBase, ''));
+                $stmt->execute($fallbackParams);
+                return $stmt;
+            }
+        };
+
+        $entriesSql = "
+            SELECT username, wager_amount
+            FROM users
+            WHERE campaign_code = :campaign%s
+            ORDER BY wager_amount DESC
+            LIMIT 20
+        ";
+        $stmt = $execute($pdo, $entriesSql, $params, $fallbackParams, $rangeClause);
+        $rows = $stmt->fetchAll() ?: [];
+
+        $statsSql = "
+            SELECT
+                COUNT(*)                      AS total_players,
+                COALESCE(SUM(wager_amount),0) AS total_wagered,
+                COALESCE(MAX(wager_amount),0) AS highest_wager
+            FROM users
+            WHERE campaign_code = :campaign%s
+        ";
+        $s = $execute($pdo, $statsSql, $params, $fallbackParams, $rangeClause);
+        $stats = $s->fetch() ?: ['total_players' => 0, 'total_wagered' => 0, 'highest_wager' => 0];
+    }
 
     // Prize map
     // Prize map for ranks 1–20
@@ -140,11 +221,14 @@ $prizes = [
         ],
         'prizes'  => $prizes,
         'range'   => [
-            'requested' => $type,
-            'effective' => $rangeKey,
-            'start'     => $rangeStart,
-            'end'       => $rangeEnd,
-            'timezone'  => $tz->getName(),
+            'requested'     => $type,
+            'effective'     => $rangeKey,
+            'start'         => $rangeStart,
+            'end'           => $rangeEnd,
+            'display_start' => $displayStart,
+            'display_end'   => $displayEnd,
+            'timezone'      => $tz->getName(),
+            'source'        => $dataSource,
         ],
     ];
 
