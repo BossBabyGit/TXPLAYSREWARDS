@@ -1011,10 +1011,23 @@ footer.pl-rail {
   right: 14px;
 }
 
+.podium-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 12px;
+}
+
 .meta {
-  text-align: right;
+  text-align: center;
   margin-left: auto;
+  margin-right: auto;
   color: #dfe6ff;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding-top: 12px;
 }
 
 .meta .lab {

@@ -141,15 +141,11 @@ if ($encodedSession === false) {
               <span class="pill right"><i data-lucide="medal" class="w-4 h-4"></i> 2nd</span>
 
               <div class="flex items-start justify-between gap-4">
-                <div>
-                  <br>
-                  <br>  
+                <div class="podium-summary">
                   <div class="rank">#2</div>
                   <div class="name" id="p2-name">—</div>
                 </div>
                 <div class="meta">
-                  <br>
-                  <br>
                   <div class="lab">Wagered</div>
                   <div class="val" id="p2-wager">$0</div>
                   <div class="lab mt-1">Prize</div>
@@ -192,18 +188,13 @@ if ($encodedSession === false) {
               <span class="pill right"><i data-lucide="crown" class="w-4 h-4"></i></span>
 
               <div class="flex items-start justify-between gap-4">
-                <div>
-                  <br>
-                  <br> 
+                <div class="podium-summary">
                   <div class="rank">#1</div>
                   <div class="name" id="p1-name">—</div>
                 </div>
                 <div class="meta">
-                  <br>
-                  <br> 
                   <div class="lab">Wagered</div>
                   <div class="val" id="p1-wager">$0</div>
-                  <br>
                   <div class="lab mt-1">Prize</div>
                   <div class="prize-chip" id="p1-prize-chip">
                    <span class="gift" aria-hidden="true">
@@ -244,15 +235,11 @@ if ($encodedSession === false) {
               <span class="pill right"><i data-lucide="medal" class="w-4 h-4"></i> 3rd</span>
 
               <div class="flex items-start justify-between gap-4">
-                <div>
-                  <br>
-                  <br> 
+                <div class="podium-summary">
                   <div class="rank">#3</div>
                   <div class="name" id="p3-name">—</div>
                 </div>
                 <div class="meta">
-                  <br>
-                  <br> 
                   <div class="lab">Wagered</div>
                   <div class="val" id="p3-wager">$0</div>
                   <div class="lab mt-1">Prize</div>
