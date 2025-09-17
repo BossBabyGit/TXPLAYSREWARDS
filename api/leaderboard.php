@@ -23,32 +23,73 @@ try {
         PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
     ]);
 
-    // optional: read query params (your frontend sends ?type=weekly)
-    $type = $_GET['type'] ?? 'weekly';
+    // optional: read query params (frontend uses "weekly" for current and "monthly" for previous)
+    $type = strtolower(trim($_GET['type'] ?? 'weekly'));
     $campaign = 'TX'; // adjust/derive if needed
 
+    $tz = new DateTimeZone('America/Chicago');
+    $now = new DateTimeImmutable('now', $tz);
+    $currentStart = $now->modify('first day of this month 00:00:00');
+    $nextStart = $currentStart->modify('first day of next month 00:00:00');
+    $previousStart = $currentStart->modify('-1 month');
+
+    $rangeKey = match ($type) {
+        'monthly', 'previous' => 'previous',
+        default => 'current',
+    };
+
+    $rangeStartDate = $rangeKey === 'previous' ? $previousStart : $currentStart;
+    $rangeEndDate = $rangeKey === 'previous' ? $currentStart : $nextStart;
+
+    $rangeStart = $rangeStartDate->format('Y-m-d H:i:s');
+    $rangeEnd = $rangeEndDate->format('Y-m-d H:i:s');
+
+    $rangeClause = ' AND created_at >= :start AND created_at < :end';
+    $params = [
+        ':campaign' => $campaign,
+        ':start'    => $rangeStart,
+        ':end'      => $rangeEnd,
+    ];
+    $fallbackParams = [':campaign' => $campaign];
+
+    $execute = static function (PDO $pdo, string $sqlBase, array $params, array $fallbackParams, string $rangeClause): PDOStatement {
+        $sql = sprintf($sqlBase, $rangeClause);
+        try {
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute($params);
+            return $stmt;
+        } catch (PDOException $e) {
+            if ($rangeClause === '') {
+                throw $e;
+            }
+            $stmt = $pdo->prepare(sprintf($sqlBase, ''));
+            $stmt->execute($fallbackParams);
+            return $stmt;
+        }
+    };
+
     // Top 20
-    $stmt = $pdo->prepare("
+    $entriesSql = "
         SELECT username, wager_amount
         FROM users
-        WHERE campaign_code = :campaign
+        WHERE campaign_code = :campaign%s
         ORDER BY wager_amount DESC
         LIMIT 20
-    ");
-    $stmt->execute([':campaign' => $campaign]);
+    ";
+    $stmt = $execute($pdo, $entriesSql, $params, $fallbackParams, $rangeClause);
     $rows = $stmt->fetchAll() ?: [];
 
     // Stats
-    $s = $pdo->prepare("
+    $statsSql = "
         SELECT
-            COUNT(*)                       AS total_players,
-            COALESCE(SUM(wager_amount),0)  AS total_wagered,
-            COALESCE(MAX(wager_amount),0)  AS highest_wager
+            COUNT(*)                      AS total_players,
+            COALESCE(SUM(wager_amount),0) AS total_wagered,
+            COALESCE(MAX(wager_amount),0) AS highest_wager
         FROM users
-        WHERE campaign_code = :campaign
-    ");
-    $s->execute([':campaign' => $campaign]);
-    $stats = $s->fetch() ?: ['total_players'=>0,'total_wagered'=>0,'highest_wager'=>0];
+        WHERE campaign_code = :campaign%s
+    ";
+    $s = $execute($pdo, $statsSql, $params, $fallbackParams, $rangeClause);
+    $stats = $s->fetch() ?: ['total_players' => 0, 'total_wagered' => 0, 'highest_wager' => 0];
 
     // Prize map
     // Prize map for ranks 1–20
@@ -98,6 +139,13 @@ $prizes = [
             'highest_wager' => (float)$stats['highest_wager'],
         ],
         'prizes'  => $prizes,
+        'range'   => [
+            'requested' => $type,
+            'effective' => $rangeKey,
+            'start'     => $rangeStart,
+            'end'       => $rangeEnd,
+            'timezone'  => $tz->getName(),
+        ],
     ];
 
     echo json_encode($payload, JSON_UNESCAPED_SLASHES);

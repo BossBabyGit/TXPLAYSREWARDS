@@ -996,7 +996,7 @@ const startCountdown = () => {
 };
 
 
-    const DATA_SOURCE = "/api/leaderboard?type=monthly";
+    const DATA_SOURCE = "/api/leaderboard.php";
     const MOCK = {
       prizes: { 1: 1000, 2: 500, 3: 250 },
       entries: Array.from({ length: 20 }).map((_, i) => ({
@@ -1029,19 +1029,33 @@ const startCountdown = () => {
       stats: { total_players: 5123, total_wagered: 3456789, highest_wager: 98765 }
     };
 
-    let cachedData = null;
-    const loadData = async () => {
-      if (window.LEADERBOARD_DATA) return window.LEADERBOARD_DATA;
-      if (cachedData) return cachedData;
+    const dataCache = new Map();
+    const loadData = async (range) => {
+      if (window.LEADERBOARD_DATA) {
+        if (range && window.LEADERBOARD_DATA[range]) {
+          return window.LEADERBOARD_DATA[range];
+        }
+        return window.LEADERBOARD_DATA;
+      }
+
+      const cacheKey = range ?? "default";
+      if (dataCache.has(cacheKey)) {
+        return dataCache.get(cacheKey);
+      }
+
+      const url = range ? `${DATA_SOURCE}?type=${encodeURIComponent(range)}` : DATA_SOURCE;
+
       try {
-        const res = await fetch(DATA_SOURCE, { headers: { Accept: "application/json" } });
+        const res = await fetch(url, { headers: { Accept: "application/json" } });
         if (res.ok) {
-          cachedData = await res.json();
-          return cachedData;
+          const json = await res.json();
+          dataCache.set(cacheKey, json);
+          return json;
         }
       } catch (err) {
         // ignore network errors and fall back to mock data
       }
+
       return MOCK;
     };
 
@@ -1053,15 +1067,15 @@ const startCountdown = () => {
       };
 
       setText("#p1-name", a?.username ?? "—");
-      setText("#p1-wager", `${formatMoney(a?.total_wagered || 0)} `);
+      setText("#p1-wager", formatMoney(a?.total_wagered || 0));
       setText("#p1-prize", formatMoney(a?.prize || 0));
 
       setText("#p2-name", b?.username ?? "—");
-      setText("#p2-wager", `${formatMoney(b?.total_wagered || 0)} `);
+      setText("#p2-wager", formatMoney(b?.total_wagered || 0));
       setText("#p2-prize", formatMoney(b?.prize || 0));
 
       setText("#p3-name", c?.username ?? "—");
-      setText("#p3-wager", `${formatMoney(c?.total_wagered || 0)} `);
+      setText("#p3-wager", formatMoney(c?.total_wagered || 0));
       setText("#p3-prize", formatMoney(c?.prize || 0));
 
       q("#p1-prize-chip")?.style.setProperty("--tone", "#EFBF04");
@@ -1073,6 +1087,18 @@ const startCountdown = () => {
       const wrap = q("#rows");
       if (!wrap) return;
       wrap.innerHTML = "";
+
+      const header = document.createElement("div");
+      header.className =
+        "grid grid-cols-[auto,1fr] sm:grid-cols-[40px,1fr,1fr,120px] px-2 sm:px-4 text-xs uppercase tracking-wide text-white/50";
+      header.innerHTML = `
+        <span class="hidden sm:block">Rank</span>
+        <span class="hidden sm:block">Player</span>
+        <span class="col-span-2 text-right sm:col-span-1 sm:text-left">Wager</span>
+        <span class="col-span-2 text-right sm:col-span-1">Prize</span>
+      `;
+      wrap.appendChild(header);
+
       entries.slice(3, 20).forEach((entry) => {
         const row = document.createElement("div");
         row.className =
@@ -1125,15 +1151,17 @@ const startCountdown = () => {
       });
     };
 
-    const hydrate = async (range = "monthly") => {
+    const hydrate = async (range = "weekly") => {
       setRangeActive(range);
-      const data = await loadData();
-      const dataset = data[range] || data;
-      const entries = [...dataset.entries].sort((a, b) => (b.total_wagered || 0) - (a.total_wagered || 0)).slice(0, 20);
+      const data = await loadData(range);
+      const dataset = data && Array.isArray(data.entries) ? data : data?.[range];
+      const source = dataset && Array.isArray(dataset.entries) && dataset.entries.length ? dataset : MOCK;
+      const entries = [...source.entries].sort((a, b) => (b.total_wagered || 0) - (a.total_wagered || 0)).slice(0, 20);
       const top3 = [entries[0], entries[1], entries[2]];
       setPodium(top3);
       renderRows(entries);
-      renderStats(dataset.stats || {});
+      const stats = dataset?.stats || source.stats || {};
+      renderStats(stats);
     };
 
     startCountdown();
