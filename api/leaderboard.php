@@ -81,7 +81,7 @@ try {
     $dataSource = 'users';
 
     $periodStart = $rangeStart;
-    $useEntriesTable = leaderboardTableExists($pdo, 'leaderboard_entries');
+    $useEntriesTable = leaderboardTableExists($pdo, 'users');
 
     if ($useEntriesTable) {
         try {
@@ -92,7 +92,7 @@ try {
 
             $entriesSql = '
                 SELECT username, wager_amount
-                FROM leaderboard_entries
+                FROM users
                 WHERE campaign_code = :campaign AND period_start = :period
                 ORDER BY wager_amount DESC
                 LIMIT 20
@@ -106,7 +106,7 @@ try {
                     COUNT(*)                      AS total_players,
                     COALESCE(SUM(wager_amount),0) AS total_wagered,
                     COALESCE(MAX(wager_amount),0) AS highest_wager
-                FROM leaderboard_entries
+                FROM users
                 WHERE campaign_code = :campaign AND period_start = :period
             ';
             $s = $pdo->prepare($statsSql);
@@ -118,7 +118,7 @@ try {
                 $rows = [];
                 $stats = ['total_players' => 0, 'total_wagered' => 0, 'highest_wager' => 0];
             } else {
-                $dataSource = 'leaderboard_entries';
+                $dataSource = 'users';
             }
         } catch (PDOException $e) {
             $useEntriesTable = false;
